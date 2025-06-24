@@ -1,0 +1,137 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Challenge {
+  id                    Int                    @id
+  legacyChallengeId     Int?                   @unique
+  name                  String?
+  projectStatusId       Int?
+  projectCategoryId     Int?
+  createUser            Int?
+  createDate            DateTime?              @default(now())
+  modifyUser            Int?
+  modifyDate            DateTime?              @default(now())
+  tcDirectProjectId     Int?
+  
+  // Relations
+  longComponentStates   LongComponentState[]
+  longCompResults      LongCompResult[]
+  longSubmissions      LongSubmission[]
+  
+  @@map("challenges")
+}
+
+model Component {
+  id                    Int                    @id @default(autoincrement())
+  challengeId           Int
+  problemId             Int?
+  resultTypeId          Int?
+  methodName            String?
+  className             String?
+  
+  // Relations
+  challenge             Challenge              @relation(fields: [challengeId], references: [id])
+  longComponentStates   LongComponentState[]
+  
+  @@map("components")
+}
+
+model LongComponentState {
+  id                    Int                    @id @default(autoincrement())
+  challengeId           Int
+  coderId               Int
+  componentId           Int
+  statusId              Int
+  submissionNumber      Int                    @default(0)
+  exampleSubmissionNumber Int                 @default(0)
+  points                Float?                 @default(0)
+  createDate            DateTime               @default(now())
+  modifyDate            DateTime               @default(now())
+  
+  // Relations
+  challenge             Challenge              @relation(fields: [challengeId], references: [id])
+  component             Component              @relation(fields: [componentId], references: [id])
+  longSubmissions       LongSubmission[]
+  
+  @@unique([challengeId, coderId, componentId])
+  @@map("long_component_states")
+}
+
+model LongSubmission {
+  id                    Int                    @id @default(autoincrement())
+  longComponentStateId  Int
+  submissionNumber      Int
+  example               Int                    @default(0)
+  openTime              BigInt?
+  submitTime            BigInt?
+  submissionPoints      Float?
+  languageId            Int?
+  createDate            DateTime               @default(now())
+  
+  // Relations
+  longComponentState    LongComponentState     @relation(fields: [longComponentStateId], references: [id])
+  
+  @@unique([longComponentStateId, submissionNumber])
+  @@map("long_submissions")
+}
+
+model LongCompResult {
+  id                    Int                    @id @default(autoincrement())
+  coderId               Int
+  challengeId           Int
+  attended              String                 @default("N") @db.Char(1)
+  placed                Int                    @default(0)
+  ratedInd              Int                    @default(0)
+  advanced              String                 @default("N") @db.Char(1)
+  systemPointTotal      Float?
+  pointTotal            Float?
+  oldRating             Int?
+  oldVol                Int?
+  newRating             Int?
+  newVol                Int?
+  createDate            DateTime               @default(now())
+  modifyDate            DateTime               @default(now())
+  
+  // Relations
+  challenge             Challenge              @relation(fields: [challengeId], references: [id])
+  
+  @@unique([coderId, challengeId])
+  @@map("long_comp_results")
+}
+
+model UserRating {
+  id                    Int                    @id @default(autoincrement())
+  userId                Int
+  ratingTypeId          Int                    @default(3) // MM rating type
+  rating                Int                    @default(1200)
+  vol                   Int                    @default(100)
+  numRatings            Int                    @default(0)
+  createDate            DateTime               @default(now())
+  modifyDate            DateTime               @default(now())
+  
+  @@unique([userId, ratingTypeId])
+  @@map("user_ratings")
+}
+
+model RatingHistory {
+  id                    Int                    @id @default(autoincrement())
+  userId                Int
+  challengeId           Int
+  ratingTypeId          Int                    @default(3)
+  oldRating             Int
+  newRating             Int
+  oldVol                Int
+  newVol                Int
+  ratingDate            DateTime               @default(now())
+  
+  @@map("rating_history")
+}

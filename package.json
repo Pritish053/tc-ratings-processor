@@ -1,36 +1,52 @@
 {
   "name": "legacy-rating-processor",
   "version": "1.0.0",
-  "description": "Topcoder - Legacy Rating Processor",
+  "description": "Topcoder - Legacy Rating Processor with PostgreSQL and Prisma",
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
     "lint": "standard",
     "lint:fix": "standard --fix",
-    "mock-api": "node mock-api/mock-api"
+    "mock-api": "node mock-api/mock-api",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "node prisma/seed.js",
+    "db:studio": "prisma studio",
+    "test": "npm run lint && npm run test:unit",
+    "test:unit": "mocha test/**/*.test.js --timeout 10000",
+    "dev": "nodemon src/app.js"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
   },
   "author": "TCSCODER",
   "license": "none",
   "devDependencies": {
-    "standard": "^14.3.1"
+    "chai": "^4.3.10",
+    "mocha": "^10.2.0",
+    "nodemon": "^3.0.2",
+    "prisma": "^5.7.0",
+    "standard": "^17.1.0"
   },
   "dependencies": {
-    "@hapi/joi": "^15.1.1",
+    "@hapi/joi": "^17.1.1",
+    "@prisma/client": "^5.7.0",
     "@topcoder-platform/topcoder-submission-api-wrapper": "^1.2.0",
-    "async-mutex": "^0.1.4",
+    "async-mutex": "^0.4.0",
     "bluebird": "^3.7.2",
-    "config": "^3.2.5",
+    "config": "^3.3.9",
     "get-parameter-names": "^0.3.0",
     "http-json-response": "^1.0.1",
-    "ifxnjs": "^10.0.5",
-    "lodash": "^4.17.15",
-    "moment-timezone": "^0.5.27",
+    "lodash": "^4.17.21",
+    "moment-timezone": "^0.5.43",
     "no-kafka": "^3.4.3",
+    "pg": "^8.11.0",
     "q": "^1.5.1",
     "topcoder-healthcheck-dropin": "^1.0.3",
-    "winston": "^3.2.1"
+    "winston": "^3.11.0"
   },
   "engines": {
-    "node": "10.x"
+    "node": "18.x"
   }
 }

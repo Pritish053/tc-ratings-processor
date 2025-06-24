@@ -1,10 +1,9 @@
 /**
- * The ID generator service
+ * The ID generator service for PostgreSQL with Prisma
  */
-const util = require('util')
 const Mutex = require('async-mutex').Mutex
+const { PrismaClient } = require('@prisma/client')
 const logger = require('./logger')
-const helper = require('./helper')
 
 /**
  * Main class of IDGenerator
@@ -12,13 +11,13 @@ const helper = require('./helper')
 class IDGenerator {
   /**
    * Constructor
-   * @param {Informix} db database
    * @param {String} seqName sequence name
    */
   constructor (seqName) {
     this.seqName = seqName
     this._availableId = 0
     this.mutex = new Mutex()
+    this.prisma = new PrismaClient()
   }
 
   /**
@@ -33,26 +32,12 @@ class IDGenerator {
       logger.debug(`this._availableId = ${this._availableId}`)
 
       if (this._availableId <= 0) {
-        const connection = await helper.getInformixConnection()
-        try {
-          // begin transaction
-          await connection.beginTransactionAsync()
+        const [nextId, availableId] = await this.getNextBlock()
+        await this.updateNextBlock(nextId + availableId + 1)
 
-          const [nextId, availableId] = await this.getNextBlock(connection)
-          await this.updateNextBlock(connection, nextId + availableId + 1)
-
-          // commit the transaction
-          await connection.commitTransactionAsync()
-
-          // Only set to this's properties after successful commit
-          this._nextId = nextId
-          this._availableId = availableId
-        } catch (e) {
-          await connection.rollbackTransactionAsync()
-          throw e
-        } finally {
-          await connection.closeAsync()
-        }
+        // Only set to this's properties after successful update
+        this._nextId = nextId
+        this._availableId = availableId
       }
 
       logger.debug(`this._availableId = ${this._availableId}`)
@@ -63,39 +48,52 @@ class IDGenerator {
   }
 
   /**
-   * Fetch next block from id_sequence
-   * @param {Object} connection the Informix connection
+   * Fetch next block from id_sequences
    * @returns {Array} [nextId, availableId]
    * @private
    */
-  async getNextBlock (connection) {
-    try {
-      const result = await connection.queryAsync(`select next_block_start, block_size from common_oltp:id_sequences where name = '${this.seqName}'`)
-      if (result.length > 0) {
-        return [Number(result[0].next_block_start) - 1, Number(result[0].block_size)]
-      } else {
-        throw new Error(`null or empty result for ${this.seqName}`)
-      }
-    } catch (e) {
-      logger.error(util.inspect(e))
-      throw e
+  async getNextBlock () {
+    const sequence = await this.prisma.idSequence.findUnique({
+      where: { name: this.seqName }
+    })
+
+    if (sequence) {
+      return [sequence.nextBlockStart - 1, sequence.blockSize]
+    } else {
+      // Create default sequence if not exists
+      const newSequence = await this.prisma.idSequence.create({
+        data: {
+          name: this.seqName,
+          nextBlockStart: 1001,
+          blockSize: 100
+        }
+      })
+      return [newSequence.nextBlockStart - 1, newSequence.blockSize]
     }
   }
 
   /**
    * Update id_sequence
-   * @param {Object} connection the Informix connection
    * @param {Number} nextStart next start id
    * @private
    */
-  async updateNextBlock (connection, nextStart) {
-    try {
-      await connection.queryAsync(`update common_oltp:id_sequences set next_block_start = ${nextStart} where name = '${this.seqName}'`)
-    } catch (e) {
-      logger.error('Failed to update id sequence: ' + this.seqName)
-      logger.error(util.inspect(e))
-      throw e
-    }
+  async updateNextBlock (nextStart) {
+    await this.prisma.idSequence.upsert({
+      where: { name: this.seqName },
+      update: { nextBlockStart: nextStart },
+      create: {
+        name: this.seqName,
+        nextBlockStart: nextStart,
+        blockSize: 100
+      }
+    })
+  }
+
+  /**
+   * Close the database connection
+   */
+  async close () {
+    await this.prisma.$disconnect()
   }
 }
 

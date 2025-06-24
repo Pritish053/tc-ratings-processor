@@ -1,11 +1,50 @@
-version: '3'
+version: '3.8'
+
 services:
+  postgres:
+    image: postgres:16.3
+    environment:
+      POSTGRES_DB: rating_processor
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rating_processor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   legacy-rating-processor:
-    image: legacy-rating-processor:latest
     build:
-      context: ../
-      dockerfile: docker/Dockerfile
-    env_file:
-      - api.env
-    network_mode: "host"
-    command: run start
+      context: .
+      dockerfile: docker/Dockerfile.postgres
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/rating_processor
+      LOG_LEVEL: debug
+      KAFKA_URL: ${KAFKA_URL:-localhost:9092}
+      SUBMISSION_API_URL: ${SUBMISSION_API_URL:-http://localhost:3001}
+      AUTH0_URL: ${AUTH0_URL}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
+      AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID}
+      AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: ["npm", "run", "start"]
+    networks:
+      - rating_processor_network
+
+volumes:
+  postgres_data:
+
+networks:
+  rating_processor_network:
+    driver: bridge

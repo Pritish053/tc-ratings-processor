@@ -1,5 +1,5 @@
 /**
- * The default configuration file.
+ * The default configuration file - Updated for PostgreSQL
  */
 
 module.exports = {
@@ -15,12 +15,20 @@ module.exports = {
   KAFKA_GROUP_ID: process.env.KAFKA_GROUP_ID || 'legacy-rating-processor',
 
   // Kafka topics to be listened
-  CHALLENGE_NOTIFICATION_EVENTS_TOPIC: process.env.CHALLENGE_NOTIFICATION_EVENTS_TOPIC || 'challenge.notification.events',
-  SUBMISSION_NOTIFICATION_AGGREGATE_TOPIC: process.env.SUBMISSION_NOTIFICATION_AGGREGATE_TOPIC || 'submission.notification.aggregate',
-  NOTIFICATION_AUTOPILOT_EVENTS_TOPIC: process.env.NOTIFICATION_AUTOPILOT_EVENTS_TOPIC || 'notifications.autopilot.events',
+  CHALLENGE_NOTIFICATION_EVENTS_TOPIC:
+    process.env.CHALLENGE_NOTIFICATION_EVENTS_TOPIC ||
+    'challenge.notification.events',
+  SUBMISSION_NOTIFICATION_AGGREGATE_TOPIC:
+    process.env.SUBMISSION_NOTIFICATION_AGGREGATE_TOPIC ||
+    'submission.notification.aggregate',
+  NOTIFICATION_AUTOPILOT_EVENTS_TOPIC:
+    process.env.NOTIFICATION_AUTOPILOT_EVENTS_TOPIC ||
+    'notifications.autopilot.events',
 
   // submission notification create topic
-  SUBMISSION_NOTIFICAION_CREATE_TOPIC: process.env.SUBMISSION_NOTIFICAION_CREATE_TOPIC || 'submission.notification.create',
+  SUBMISSION_NOTIFICAION_CREATE_TOPIC:
+    process.env.SUBMISSION_NOTIFICAION_CREATE_TOPIC ||
+    'submission.notification.create',
 
   IGNORED_REVIEW_TYPES: process.env.IGNORED_REVIEW_TYPES || '["AV Scan"]',
 
@@ -35,18 +43,20 @@ module.exports = {
   SUBMISSION_API_URL: process.env.SUBMISSION_API_URL || 'http://localhost:3001',
 
   // Sequence Name for table long_component_state
-  ID_SEQ_COMPONENT_STATE: process.env.ID_SEQ_COMPONENT_STATE || 'COMPONENT_STATE_SEQ',
+  ID_SEQ_COMPONENT_STATE:
+    process.env.ID_SEQ_COMPONENT_STATE || 'COMPONENT_STATE_SEQ',
 
-  // informix database configuration
-  INFORMIX: {
-    SERVER: process.env.IFX_SERVER || 'informixoltp_tcp', // informix server
-    DATABASE: process.env.IFX_DATABASE || 'informixoltp', // informix database
-    HOST: process.env.INFORMIX_HOST || 'localhost', // host
-    PROTOCOL: process.env.IFX_PROTOCOL || 'onsoctcp',
-    PORT: process.env.IFX_PORT || '2021', // port
-    DB_LOCALE: process.env.IFX_DB_LOCALE || 'en_US.57372',
-    USER: process.env.IFX_USER || 'informix', // user
-    PASSWORD: process.env.IFX_PASSWORD || '1nf0rm1x', // password
-    POOL_MAX_SIZE: parseInt(process.env.IFX_POOL_MAX_SIZE) || 10 // use connection pool in processor, the pool size
+  // PostgreSQL database configuration
+  DATABASE_URL:
+    process.env.DATABASE_URL ||
+    'postgresql://postgres:password@localhost:5432/rating_processor',
+
+  // Optional individual PostgreSQL settings (if not using DATABASE_URL)
+  POSTGRES: {
+    HOST: process.env.POSTGRES_HOST || 'localhost',
+    PORT: process.env.POSTGRES_PORT || 5432,
+    USERNAME: process.env.POSTGRES_USERNAME || 'postgres',
+    PASSWORD: process.env.POSTGRES_PASSWORD || 'password',
+    DATABASE: process.env.POSTGRES_DATABASE || 'rating_processor'
   }
 }

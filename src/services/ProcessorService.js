@@ -1,5 +1,5 @@
 /**
- * Processor Service
+ * Processor Service - Updated for PostgreSQL with Prisma
  */
 
 const _ = require('lodash')
@@ -11,12 +11,22 @@ const logger = require('../common/logger')
 const helper = require('../common/helper')
 const IDGenerator = require('../common/IdGenerator')
 const constants = require('../constants')
-const InformixService = require('./InformixService')
+const DatabaseService = require('./DatabaseService')
 
 const idGen = new IDGenerator(config.ID_SEQ_COMPONENT_STATE)
+const dbService = new DatabaseService()
 
-const submissionApiClient = submissionApi(_.pick(config, [
-  'AUTH0_URL', 'AUTH0_AUDIENCE', 'TOKEN_CACHE_TIME', 'AUTH0_CLIENT_ID', 'AUTH0_CLIENT_SECRET', 'SUBMISSION_API_URL', 'AUTH0_PROXY_SERVER_URL']))
+const submissionApiClient = submissionApi(
+  _.pick(config, [
+    'AUTH0_URL',
+    'AUTH0_AUDIENCE',
+    'TOKEN_CACHE_TIME',
+    'AUTH0_CLIENT_ID',
+    'AUTH0_CLIENT_SECRET',
+    'SUBMISSION_API_URL',
+    'AUTH0_PROXY_SERVER_URL'
+  ])
+)
 
 const timeZone = 'America/New_York'
 
@@ -28,64 +38,63 @@ const timeZone = 'America/New_York'
 async function processRegistration (payload) {
   logger.info('Process Marathon Match registration event.')
 
-  // informix database connection
-  const connection = await helper.getInformixConnection()
-
   try {
-    await connection.beginTransactionAsync()
+    await dbService.executeInTransaction(async () => {
+      const roundId = await dbService.getMMRoundId(payload.data.challengeId)
 
-    const roundId = await InformixService.getMMRoundId(connection, payload.data.challengeId)
+      if (roundId) {
+        logger.debug('Getting longComponentStateId')
+        const longComponentStateId = await idGen.getNextId()
+        logger.debug(`longComponentStateId = ${longComponentStateId}`)
 
-    if (roundId) {
-      logger.debug('Getting longComponentStateId')
-      const longComponentStateId = await idGen.getNextId()
-      logger.debug(`longComponentStateId = ${longComponentStateId}`)
+        const componentId = await dbService.getComponentId(roundId)
 
-      const componentId = await InformixService.getComponentId(connection, roundId)
+        await dbService.createLongComponentState({
+          long_component_state_id: longComponentStateId,
+          round_id: roundId,
+          challenge_id: payload.data.challengeId,
+          coder_id: payload.data.userId,
+          component_id: componentId,
+          status_id: constants.componentStatus.PassedSystemTest,
+          submission_number: 0,
+          example_submission_number: 0
+        })
 
-      await InformixService.insertRecord(connection, 'long_component_state', {
-        long_component_state_id: longComponentStateId,
-        round_id: roundId,
-        coder_id: payload.data.userId,
-        component_id: componentId,
-        status_id: constants.componentStatus.PassedSystemTest,
-        submission_number: 0,
-        example_submission_number: 0
-      })
+        const ratedInd = await dbService.getRatedInd(roundId)
 
-      const ratedInd = await InformixService.getRatedInd(connection, roundId)
+        await dbService.createLongCompResult({
+          coder_id: payload.data.userId,
+          round_id: roundId,
+          challenge_id: payload.data.challengeId,
+          attended: 'N',
+          placed: 0,
+          rated_ind: ratedInd,
+          advanced: 'N'
+        })
 
-      await InformixService.insertRecord(connection, 'long_comp_result', {
-        coder_id: payload.data.userId,
-        round_id: roundId,
-        attended: 'N',
-        placed: 0,
-        rated_ind: ratedInd,
-        advanced: 'N'
-      })
-
-      await connection.commitTransactionAsync()
-
-      logger.info('Completed processing Marathon Match registration event.')
-    } else {
-      logger.info(`Marathon Match doesn't exist with given id: ${payload.data.challengeId}, ignore this event`)
-    }
+        logger.info('Completed processing Marathon Match registration event.')
+      } else {
+        logger.info(
+          `Marathon Match doesn't exist with given id: ${payload.data.challengeId}, ignore this event`
+        )
+      }
+    })
   } catch (e) {
     logger.error('Error in processing Marathon Match registration event.')
-    await connection.rollbackTransactionAsync()
     throw e
-  } finally {
-    await connection.closeAsync()
   }
 }
 
 processRegistration.schema = {
-  payload: Joi.object().keys({
-    data: Joi.object().keys({
-      challengeId: Joi.id().required(),
-      userId: Joi.id().required()
+  payload: Joi.object()
+    .keys({
+      data: Joi.object().keys({
+        challengeId: Joi.id().required(),
+        userId: Joi.id().required()
+      })
     })
-  }).unknown(true).required()
+    .unknown(true)
+    .required()
 }
 
 /**
@@ -104,15 +113,22 @@ async function processReview (payload) {
 
   let submissionRes
   try {
-    submissionRes = await submissionApiClient.getSubmission(payload.submissionId)
+    submissionRes = await submissionApiClient.getSubmission(
+      payload.submissionId
+    )
   } catch (err) {
     throw new Error(_.get(err, 'body.message'))
   }
 
   if (!submissionRes.body.created) {
-    throw new Error(`No submission time for submission ${payload.submissionId}`)
+    throw new Error(
+      `No submission time for submission ${payload.submissionId}`
+    )
   }
-  const submitTime = new Date(momentTZ.tz(submissionRes.body.created, timeZone).format()).getTime() / 1000
+  const submitTime =
+    new Date(
+      momentTZ.tz(submissionRes.body.created, timeZone).format()
+    ).getTime() / 1000
   const challengeId = submissionRes.body.challengeId
   const memberId = submissionRes.body.memberId
   if (!memberId) {
@@ -122,52 +138,56 @@ async function processReview (payload) {
     throw new Error(`No challengeId for submission ${payload.submissionId}`)
   }
 
-  // informix database connection
-  const connection = await helper.getInformixConnection()
-
   try {
-    const roundId = await InformixService.getMMRoundId(connection, challengeId)
-    if (roundId) {
-      const { longComponentStateId, submissionNumber } = await InformixService.getLongComponentStateDetail(connection, roundId, memberId)
+    await dbService.executeInTransaction(async () => {
+      const roundId = await dbService.getMMRoundId(challengeId)
+      if (roundId) {
+        const { longComponentStateId, submissionNumber } =
+          await dbService.getLongComponentStateDetail(roundId, memberId)
 
-      await InformixService.insertRecord(connection, 'long_submission', {
-        long_component_state_id: longComponentStateId,
-        submission_number: submissionNumber + 1,
-        example: 0,
-        open_time: submitTime,
-        submit_time: submitTime,
-        submission_points: payload.score,
-        language_id: 9
-      })
+        await dbService.createLongSubmission({
+          long_component_state_id: longComponentStateId,
+          round_id: roundId,
+          submission_number: submissionNumber + 1,
+          example: 0,
+          open_time: submitTime,
+          submit_time: submitTime,
+          submission_points: payload.score,
+          language_id: 9
+        })
 
-      await InformixService.updateRecord(connection, 'long_component_state', {
-        points: payload.score,
-        submission_number: submissionNumber + 1
-      }, {
-        long_component_state_id: longComponentStateId
-      })
+        await dbService.updateLongComponentState(
+          {
+            points: payload.score,
+            submission_number: submissionNumber + 1
+          },
+          {
+            long_component_state_id: longComponentStateId
+          }
+        )
 
-      await connection.commitTransactionAsync()
-
-      logger.info('Completed processing Marathon Match review event.')
-    } else {
-      logger.info(`Marathon Match doesn't exist with challenge id: ${challengeId}, ignore this event`)
-    }
+        logger.info('Completed processing Marathon Match review event.')
+      } else {
+        logger.info(
+          `Marathon Match doesn't exist with challenge id: ${challengeId}, ignore this event`
+        )
+      }
+    })
   } catch (e) {
     logger.error('Error in processing Marathon Match review event.')
-    await connection.rollbackTransactionAsync()
     throw e
-  } finally {
-    await connection.closeAsync()
   }
 }
 
 processReview.schema = {
-  payload: Joi.object().keys({
-    submissionId: Joi.sid().required(),
-    typeId: Joi.sid().required(),
-    score: Joi.number().required()
-  }).unknown(true).required()
+  payload: Joi.object()
+    .keys({
+      submissionId: Joi.sid().required(),
+      typeId: Joi.sid().required(),
+      score: Joi.number().required()
+    })
+    .unknown(true)
+    .required()
 }
 
 /**
@@ -180,7 +200,9 @@ async function processReviewSummation (payload) {
 
   let submissionRes
   try {
-    submissionRes = await submissionApiClient.getSubmission(payload.submissionId)
+    submissionRes = await submissionApiClient.getSubmission(
+      payload.submissionId
+    )
   } catch (err) {
     throw new Error(_.get(err, 'body.message'))
   }
@@ -189,7 +211,9 @@ async function processReviewSummation (payload) {
   const memberId = submissionRes.body.memberId
   const legacySubmissionId = submissionRes.body.legacySubmissionId
   if (!legacySubmissionId) {
-    throw new Error(`No legacySubmissionId for submission ${payload.submissionId}`)
+    throw new Error(
+      `No legacySubmissionId for submission ${payload.submissionId}`
+    )
   }
   if (!memberId) {
     throw new Error(`No memberId for submission ${payload.submissionId}`)
@@ -198,43 +222,50 @@ async function processReviewSummation (payload) {
     throw new Error(`No challengeId for submission ${payload.submissionId}`)
   }
 
-  // informix database connection
-  const connection = await helper.getInformixConnection()
-
   try {
-    const roundId = await InformixService.getMMRoundId(connection, challengeId)
-    if (roundId) {
-      const initialScore = await InformixService.getSubmissionInitialScore(connection, legacySubmissionId)
+    await dbService.executeInTransaction(async () => {
+      const roundId = await dbService.getMMRoundId(challengeId)
+      if (roundId) {
+        const initialScore = await dbService.getSubmissionInitialScore(
+          legacySubmissionId
+        )
 
-      await InformixService.updateRecord(connection, 'long_comp_result', {
-        system_point_total: payload.aggregateScore,
-        point_total: initialScore,
-        attended: 'Y'
-      }, {
-        round_id: roundId,
-        coder_id: memberId
-      })
+        await dbService.updateLongCompResult(
+          {
+            system_point_total: payload.aggregateScore,
+            point_total: initialScore,
+            attended: 'Y'
+          },
+          {
+            round_id: roundId,
+            challenge_id: challengeId,
+            coder_id: memberId
+          }
+        )
 
-      await connection.commitTransactionAsync()
-
-      logger.info('Completed processing Marathon Match review summation event.')
-    } else {
-      logger.info(`Marathon Match doesn't exist with challenge id: ${challengeId}, ignore this event`)
-    }
+        logger.info(
+          'Completed processing Marathon Match review summation event.'
+        )
+      } else {
+        logger.info(
+          `Marathon Match doesn't exist with challenge id: ${challengeId}, ignore this event`
+        )
+      }
+    })
   } catch (e) {
     logger.error('Error in processing Marathon Match review summation event.')
-    await connection.rollbackTransactionAsync()
     throw e
-  } finally {
-    await connection.closeAsync()
   }
 }
 
 processReviewSummation.schema = {
-  payload: Joi.object().keys({
-    submissionId: Joi.sid().required(),
-    aggregateScore: Joi.number().required()
-  }).unknown(true).required()
+  payload: Joi.object()
+    .keys({
+      submissionId: Joi.sid().required(),
+      aggregateScore: Joi.number().required()
+    })
+    .unknown(true)
+    .required()
 }
 
 /**
@@ -244,47 +275,49 @@ processReviewSummation.schema = {
  */
 async function processReviewEnd (payload) {
   if (payload.phaseTypeName === 'Review' && payload.state === 'End') {
-    // informix database connection
-    const connection = await helper.getInformixConnection()
-
     try {
-      const roundId = await InformixService.getMMRoundId(connection, payload.projectId)
+      await dbService.executeInTransaction(async () => {
+        const roundId = await dbService.getMMRoundId(payload.projectId)
 
-      if (roundId) {
-        const result = await InformixService.getMMResult(connection, roundId)
-        result.sort((first, second) => second.point - first.point)
+        if (roundId) {
+          const result = await dbService.getMMResult(roundId)
+          result.sort((first, second) => second.point - first.point)
 
-        for (let i = 0; i < result.length; i++) {
-          if (i === 0 || result[i].point !== result[i - 1].point) {
-            result[i].placed = i + 1
-          } else {
-            result[i].placed = result[i - 1].placed
+          for (let i = 0; i < result.length; i++) {
+            if (i === 0 || result[i].point !== result[i - 1].point) {
+              result[i].placed = i + 1
+            } else {
+              result[i].placed = result[i - 1].placed
+            }
+
+            const { rating, vol } = await dbService.getUserMMRating(
+              result[i].coderId
+            )
+
+            await dbService.updateLongCompResult(
+              {
+                placed: result[i].placed,
+                old_rating: rating,
+                old_vol: vol
+              },
+              {
+                round_id: roundId,
+                challenge_id: payload.projectId,
+                coder_id: result[i].coderId
+              }
+            )
           }
 
-          const { rating, vol } = await InformixService.getUserMMRating(connection, result[i].coderId)
-
-          await InformixService.updateRecord(connection, 'long_comp_result', {
-            placed: result[i].placed,
-            old_rating: rating,
-            old_vol: vol
-          }, {
-            round_id: roundId,
-            coder_id: result[i].coderId
-          })
+          logger.info('Completed processing Marathon Match review end event.')
+        } else {
+          logger.info(
+            `Marathon Match doesn't exist with challenge id: ${payload.projectId}, ignore this event`
+          )
         }
-
-        await connection.commitTransactionAsync()
-
-        logger.info('Completed processing Marathon Match review end event.')
-      } else {
-        logger.info(`Marathon Match doesn't exist with challenge id: ${payload.projectId}, ignore this event`)
-      }
+      })
     } catch (e) {
       logger.error('Error in processing Marathon Match review end event.')
-      await connection.rollbackTransactionAsync()
       throw e
-    } finally {
-      await connection.closeAsync()
     }
   } else {
     logger.info('Ignore this event, only process review end event')
@@ -292,11 +325,14 @@ async function processReviewEnd (payload) {
 }
 
 processReviewEnd.schema = {
-  payload: Joi.object().keys({
-    projectId: Joi.id().required(),
-    phaseTypeName: Joi.string().required(),
-    state: Joi.string().required()
-  }).unknown(true).required()
+  payload: Joi.object()
+    .keys({
+      projectId: Joi.id().required(),
+      phaseTypeName: Joi.string().required(),
+      state: Joi.string().required()
+    })
+    .unknown(true)
+    .required()
 }
 
 /**
@@ -311,14 +347,19 @@ async function processMessage (message) {
       logger.info('Ignore this event, not user registration')
     }
   } else if (message.topic === config.SUBMISSION_NOTIFICATION_AGGREGATE_TOPIC) {
-    if (message.payload.originalTopic !== config.SUBMISSION_NOTIFICAION_CREATE_TOPIC) {
-      logger.info('Ignore this event, originalTopic doesn\'t match')
+    if (
+      message.payload.originalTopic !==
+      config.SUBMISSION_NOTIFICAION_CREATE_TOPIC
+    ) {
+      logger.info("Ignore this event, originalTopic doesn't match")
     } else if (message.payload.resource === constants.resources.review) {
       await this.processReview(message.payload)
-    } else if (message.payload.resource === constants.resources.reviewSummation) {
+    } else if (
+      message.payload.resource === constants.resources.reviewSummation
+    ) {
       await this.processReviewSummation(message.payload)
     } else {
-      logger.info('Ignore this event, resource doesn\'t match')
+      logger.info("Ignore this event, resource doesn't match")
     }
   } else {
     await this.processReviewEnd(message.payload)
@@ -326,13 +367,15 @@ async function processMessage (message) {
 }
 
 processMessage.schema = {
-  message: Joi.object().keys({
-    topic: Joi.string().required(),
-    originator: Joi.string().required(),
-    timestamp: Joi.date().required(),
-    'mime-type': Joi.string().required(),
-    payload: Joi.object().required()
-  }).required()
+  message: Joi.object()
+    .keys({
+      topic: Joi.string().required(),
+      originator: Joi.string().required(),
+      timestamp: Joi.date().required(),
+      'mime-type': Joi.string().required(),
+      payload: Joi.object().required()
+    })
+    .required()
 }
 
 module.exports = {
